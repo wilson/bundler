@@ -21,15 +21,16 @@ module Spec
       Dir.chdir(bundled_app2, &blk)
     end
 
-    def run_in_context(cmd)
-      env = bundled_path.join('environment.rb')
-      raise "Missing environment.rb" unless env.file?
-      @out = ruby "-r #{env}", cmd
-    end
-
     def run(cmd, *args)
+      opts = args.last.is_a?(Hash) ? args.pop : {}
       groups = args.map {|a| a.inspect }.join(", ")
-      setup = "require 'rubygems' ; require 'bundler' ; Bundler.setup(#{groups})\n"
+
+      if opts[:lite_runtime]
+        setup = "require '#{bundled_app(".bundle/environment")}' ; Bundler.setup(#{groups})\n"
+      else
+        setup = "require 'rubygems' ; require 'bundler' ; Bundler.setup(#{groups})\n"
+      end
+
       @out = ruby(setup + cmd)
     end
 
@@ -41,19 +42,21 @@ module Spec
       require "open3"
       args = options.map { |k,v| " --#{k} #{v}"}.join
       gemfile = File.expand_path('../../../bin/bundle', __FILE__)
-      @in, @out, @err = Open3.popen3("#{Gem.ruby} -I#{lib} #{gemfile} #{cmd}#{args}")
-      @err = @err.read.strip
-
-      puts @err unless @err.empty?
-
-      @out = @out.read.strip
+      input, out, err, waitthread = Open3.popen3("#{Gem.ruby} -I#{lib} #{gemfile} #{cmd}#{args}")
+      @err = err.read.strip
+      puts @err if $show_err && !@err.empty?
+      @out = out.read.strip
+      @exitstatus = nil
+      @exitstatus = waitthread.value.to_i if waitthread
     end
 
     def ruby(opts, ruby = nil)
       ruby, opts = opts, nil unless ruby
       ruby.gsub!(/(?=")/, "\\")
       ruby.gsub!('$', '\\$')
-      %x{#{Gem.ruby} -I#{lib} #{opts} -e "#{ruby}"}.strip
+      out = %x{#{Gem.ruby} -I#{lib} #{opts} -e "#{ruby}"}.strip
+      @exitstatus = $?.exitstatus
+      out
     end
 
     def config(config = nil)

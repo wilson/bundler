@@ -1,6 +1,5 @@
 $:.unshift File.expand_path('../vendor', __FILE__)
 require 'thor'
-require 'bundler'
 require 'rubygems/config_file'
 
 # Work around a RubyGems bug
@@ -36,6 +35,7 @@ module Bundler
         missing.each do |d|
           puts "  * #{d}"
         end
+        exit 1
       else
         env.specs
         puts "The Gemfile's dependencies are satisfied"
@@ -43,22 +43,32 @@ module Bundler
     end
 
     desc "install", "Install the current environment to the system"
-    method_option :without, :type => :array, :banner => "Exclude gems thar are part of the specified named group"
+    method_option "without", :type => :array,   :banner => "Exclude gems that are part of the specified named group."
+    method_option "relock",  :type => :boolean, :banner => "Unlock, install the gems, and relock."
+    method_option "disable-shared-gems", :type => :boolean, :banner => "Do not use any shared gems, such as the system gem repository."
     def install(path = nil)
       opts = options.dup
       opts[:without] ||= []
       opts[:without].map! { |g| g.to_sym }
 
       Bundler.settings[:path] = path if path
+      Bundler.settings[:disable_shared_gems] = '1' if options["disable-shared-gems"]
+
+      remove_lockfiles if options[:relock]
 
       Installer.install(Bundler.root, Bundler.definition, opts)
+      # Ensures that .bundle/environment.rb exists
+      # TODO: Figure out a less hackish way to do this
+      Bundler.load
+
+      lock if options[:relock]
     end
 
     desc "lock", "Locks the bundle to the current set of dependencies, including all child dependencies."
     def lock
-      if File.exist?("#{Bundler.root}/Gemfile.lock")
+      if locked?
         Bundler.ui.info("The bundle is already locked, relocking.")
-        `rm #{Bundler.root}/Gemfile.lock`
+        remove_lockfiles
       end
 
       environment = Bundler.load
@@ -71,8 +81,12 @@ module Bundler
 
     desc "unlock", "Unlock the bundle. This allows gem versions to be changed"
     def unlock
-      environment = Bundler.load
-      environment.unlock
+      if locked?
+        remove_lockfiles
+        Bundler.ui.info("The bundle is now unlocked. The dependencies may be changed.")
+      else
+        Bundler.ui.info("The bundle is not currently locked.")
+      end
     end
 
     desc "show", "Shows all gems that are part of the bundle."
@@ -93,13 +107,34 @@ module Bundler
     desc "exec", "Run the command in context of the bundle"
     def exec(*)
       ARGV.delete('exec')
-      ENV["RUBYOPT"] = %W(
-        -I#{File.expand_path('../..', __FILE__)}
-        -rbundler/setup
-        #{ENV["RUBYOPT"]}
-      ).compact.join(' ')
+
+      # Set PATH
+      paths = (ENV['PATH'] || "").split(File::PATH_SEPARATOR)
+      paths.unshift "#{Bundler.bundle_path}/bin"
+      ENV["PATH"] = paths.uniq.join(File::PATH_SEPARATOR)
+
+      # Set BUNDLE_GEMFILE
+      ENV['BUNDLE_GEMFILE'] = Bundler::SharedHelpers.default_gemfile.to_s
+
+      # Set RUBYOPT
+      rubyopt = [ENV["RUBYOPT"]].compact
+      rubyopt.unshift "-rbundler/setup"
+      rubyopt.unshift "-I#{File.expand_path('../..', __FILE__)}"
+      ENV["RUBYOPT"] = rubyopt.join(' ')
+
+      # Run
       Kernel.exec *ARGV
     end
 
+  private
+
+    def locked?
+      File.exist?("#{Bundler.root}/Gemfile.lock") || File.exist?("#{Bundler.root}/.bundle/environment.rb")
+    end
+
+    def remove_lockfiles
+      FileUtils.rm_f "#{Bundler.root}/Gemfile.lock"
+      FileUtils.rm_f "#{Bundler.root}/.bundle/environment.rb"
+    end
   end
 end

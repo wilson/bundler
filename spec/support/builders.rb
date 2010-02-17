@@ -55,6 +55,11 @@ module Spec
         end
 
         build_gem "platform_specific" do |s|
+          s.platform = Gem::Platform.local
+          s.write "lib/platform_specific.rb", "PLATFORM_SPECIFIC = '1.0.0 #{Gem::Platform.local}'"
+        end
+
+        build_gem "platform_specific" do |s|
           s.platform = "java"
           s.write "lib/platform_specific.rb", "PLATFORM_SPECIFIC = '1.0.0 JAVA'"
         end
@@ -96,6 +101,11 @@ module Spec
             }
           C
         end
+
+        build_gem "bundler", "0.8.1" do |s|
+          s.write "lib/bundler/omg.rb", ""
+          s.write "lib/rubygems_plugin.rb", "require 'bundler/omg' ; puts 'FAIL'"
+        end
       end
     end
 
@@ -110,6 +120,7 @@ module Spec
         build_gem "rack", "1.2" do |s|
           s.executables = "rackup"
         end
+        yield if block_given?
       end
     end
 

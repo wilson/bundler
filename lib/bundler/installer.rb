@@ -12,16 +12,21 @@ module Bundler
         return
       end
 
-      specs.sort_by { |s| s.name }.each do |spec|
-        # unless spec.source.is_a?(Source::SystemGems)
-          Bundler.ui.info "Installing #{spec.name} (#{spec.version}) from #{spec.source} "
-        # end
+      # Ensure that BUNDLE_PATH exists
+      FileUtils.mkdir_p(Bundler.bundle_path)
 
+      specs.sort_by { |s| s.name }.each do |spec|
         if (spec.groups & options[:without]).any?
           Bundler.ui.debug "  * Not in requested group; skipping."
           next
         end
+
+        # unless spec.source.is_a?(Source::SystemGems)
+          Bundler.ui.info "Installing #{spec.name} (#{spec.version}) from #{spec.source} "
+        # end
+
         spec.source.install(spec)
+
         Bundler.ui.info ""
       end
 

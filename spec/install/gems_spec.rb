@@ -1,10 +1,6 @@
 require File.expand_path('../../spec_helper', __FILE__)
 
 describe "gemfile install with gem sources" do
-  before :each do
-    in_app_root
-  end
-
   it "prints output and returns if no dependencies are specified" do
     gemfile <<-G
       source "file://#{gem_repo1}"
@@ -20,6 +16,7 @@ describe "gemfile install with gem sources" do
       gem 'rack'
     G
 
+    default_bundle_path("gems/rack-1.0.0").should exist
     should_be_installed("rack 1.0.0")
   end
 
@@ -125,7 +122,20 @@ describe "gemfile install with gem sources" do
     G
 
     run "require 'platform_specific' ; puts PLATFORM_SPECIFIC"
-    out.should == '1.0.0 RUBY'
+    out.should == "1.0.0 #{Gem::Platform.local}"
+  end
+
+  it "works with repositories that don't provide prerelease_specs.4.8.gz" do
+    build_repo2
+    Dir["#{gem_repo2}/prerelease*"].each { |f| File.delete(f) }
+
+    install_gemfile <<-G
+      source "file://#{gem_repo2}"
+      gem "rack"
+    G
+
+    out.should include("Source 'file:#{gem_repo2}' does not support prerelease gems")
+    should_be_installed "rack 1.0.0"
   end
 
   describe "with extra sources" do
@@ -148,8 +158,8 @@ describe "gemfile install with gem sources" do
   end
 
   describe "when locked" do
-    it "works" do
-      system_gems "rack-1.0.0" do
+    before(:each) do
+      system_gems "rack-0.9.1" do
         gemfile <<-G
           source "file://#{gem_repo1}"
           gem "rack"
@@ -157,10 +167,28 @@ describe "gemfile install with gem sources" do
 
         bundle :lock
       end
+    end
 
+    it "works" do
       system_gems [] do
         bundle :install
+        should_be_installed "rack 0.9.1"
+      end
+    end
+
+    it "allows --relock to update the dependencies" do
+      system_gems "rack-0.9.1" do
+        bundle "install --relock"
         should_be_installed "rack 1.0.0"
+      end
+    end
+
+    it "regenerates .bundle/environment.rb if missing" do
+      bundled_app('.bundle/environment.rb').delete
+      system_gems [] do
+        bundle :install
+        bundled_app('.bundle/environment.rb').should exist
+        should_be_installed "rack 0.9.1"
       end
     end
   end
@@ -211,6 +239,46 @@ describe "gemfile install with gem sources" do
       bundle "install ./vendor"
 
       bundled_app('vendor/gems/rack-1.0.0').should be_directory
+      should_be_installed "rack 1.0.0"
+    end
+
+    it "does not disable system gems when specifying a path to install to" do
+      build_gem "rack", "1.1.0", :to_system => true
+      bundle "install ./vendor"
+
+      bundled_app('vendor/gems/rack-1.1.0').should_not be_directory
+      should_be_installed "rack 1.1.0"
+    end
+  end
+
+  describe "disabling system gems" do
+    before :each do
+      build_gem "rack", "1.0.0", :to_system => true do |s|
+        s.write "lib/rack.rb", "puts 'FAIL'"
+      end
+    end
+
+    it "does not use available system gems" do
+      gemfile <<-G
+        source "file://#{gem_repo1}"
+        gem "rack"
+      G
+
+      bundle "install --disable-shared-gems"
+      should_be_installed "rack 1.0.0"
+    end
+
+    it "remembers to disable system gems after the first time" do
+      gemfile <<-G
+        source "file://#{gem_repo1}"
+        gem "rack"
+      G
+
+      bundle "install vendor/gems --disable-shared-gems"
+      FileUtils.rm_rf bundled_app('vendor/gems')
+      bundle "install"
+
+      bundled_app('vendor/gems/gems/rack-1.0.0').should be_directory
       should_be_installed "rack 1.0.0"
     end
   end
@@ -279,6 +347,10 @@ describe "gemfile install with gem sources" do
 
     it "does not install gems from the excluded group" do
       should_not_be_installed "activesupport 2.3.5", :groups => [:default]
+    end
+
+    it "does not say it installed gems from the excluded group" do
+      out.should_not include("activesupport")
     end
 
     it "allows Bundler.setup for specific groups" do

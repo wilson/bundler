@@ -3,9 +3,9 @@ require File.expand_path('../../spec_helper', __FILE__)
 describe "gemfile install with git sources" do
   describe "when floating on master" do
     before :each do
-      in_app_root
-
-      build_git "foo"
+      build_git "foo" do |s|
+        s.executables = "foobar"
+      end
 
       install_gemfile <<-G
         git "#{lib_path('foo-1.0')}"
@@ -22,6 +22,10 @@ describe "gemfile install with git sources" do
       RUBY
 
       out.should == "WIN"
+    end
+
+    it "caches the git repo" do
+      default_bundle_path('cache/bundler/git/foo-1.0-2da26eec78721fc54f4cc2709816e1cd504a4e82').should exist
     end
 
     it "floats on master if no ref is specified" do
@@ -42,6 +46,22 @@ describe "gemfile install with git sources" do
 
         out.should == "WIN"
       end
+    end
+
+    it "setups executables" do
+      pending_jruby_shebang_fix
+      bundle "exec foobar"
+      out.should == "1.0"
+    end
+
+    it "complains if pinned specs don't exist in the git repo" do
+      build_git "foo"
+
+      install_gemfile <<-G
+        gem "foo", "1.1", :git => "#{lib_path('foo-1.0')}"
+      G
+
+      out.should include("Source contains 'foo' at: 1.0")
     end
   end
 
@@ -72,7 +92,8 @@ describe "gemfile install with git sources" do
       install_gemfile <<-G
         gem "thingy", :git => "git@example.fkdmn1234fake.com:somebody/thingy.git"
       G
-      err.should include("connect to host example.fkdmn1234fake.com port 22")
+      err.should include("example.fkdmn1234fake.com")
+      err.should include("ssh")
     end
 
     it "installs from git even if a newer gem is available elsewhere" do

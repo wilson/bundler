@@ -8,8 +8,12 @@ module Spec
       root.join("tmp", *path)
     end
 
-    def home
-      tmp.join("home")
+    def home(*path)
+      tmp.join("home", *path)
+    end
+
+    def default_bundle_path(*path)
+      home(".bundle/#{Gem.ruby_engine}/#{Gem::ConfigMap[:ruby_version]}", *path)
     end
 
     def bundled_app(*path)

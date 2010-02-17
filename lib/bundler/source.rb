@@ -30,8 +30,11 @@ module Bundler
         gem_path  = Gem::RemoteFetcher.fetcher.download(spec, uri, destination)
         Bundler.ui.debug "  * Installing"
         installer = Gem::Installer.new gem_path,
-          :install_dir => Gem.dir,
-          :ignore_dependencies => true
+          :install_dir         => Gem.dir,
+          :ignore_dependencies => true,
+          :wrappers            => true,
+          :env_shebang         => true,
+          :bin_dir             => "#{Gem.dir}/bin"
 
         installer.install
       end
@@ -59,7 +62,7 @@ module Bundler
       def prerelease_specs
         Marshal.load(Gem::RemoteFetcher.fetcher.fetch_path("#{uri}/prerelease_specs.4.8.gz"))
       rescue Gem::RemoteFetcher::FetchError
-        Bundler.logger.warn "Source '#{uri}' does not support prerelease gems"
+        Bundler.ui.warn "Source '#{uri}' does not support prerelease gems"
         []
       end
     end
@@ -115,8 +118,11 @@ module Bundler
 
         Bundler.ui.debug "  * Installing from pack"
         installer = Gem::Installer.new "#{@path}/#{spec.full_name}.gem",
-          :install_dir => Gem.dir,
-          :ignore_dependencies => true
+          :install_dir         => Gem.dir,
+          :ignore_dependencies => true,
+          :wrappers            => true,
+          :env_shebang         => true,
+          :bin_dir             => "#{Gem.dir}/bin"
 
         installer.install
       end
@@ -154,9 +160,10 @@ module Bundler
           if File.directory?(path)
             Dir["#{path}/#{@glob}"].each do |file|
               file = Pathname.new(file)
+              relative_path = file.relative_path_from(Pathname.new(path))
               # Do it in the root of the repo in case they do
               # assume being in the root
-              if spec = Dir.chdir(path) { eval(File.read(file)) }
+              if spec = Dir.chdir(path) { eval(File.read(relative_path)) }
                 spec = Specification.from_gemspec(spec)
                 spec.loaded_from = file
                 spec.source      = self
@@ -173,9 +180,28 @@ module Bundler
 
       def install(spec)
         Bundler.ui.debug "  * Using path #{path}"
+        generate_bin(spec)
       end
 
       alias specs local_specs
+
+    private
+
+      def generate_bin(spec)
+        # HAX -- Generate the bin
+        bin_dir = "#{Gem.dir}/bin"
+        gem_dir = spec.full_gem_path
+        installer = Gem::Installer.allocate
+        installer.instance_eval do
+          @spec     = spec
+          @bin_dir  = bin_dir
+          @gem_dir  = gem_dir
+          @wrappers = true
+          @env_shebang = false
+          @format_executable = false
+        end
+        installer.generate_bin
+      end
 
     end
 
@@ -210,7 +236,7 @@ module Bundler
             # Loop over the lines and extract the relative path and the
             # git hash
             lines.each do |line|
-              next unless line =~ %r{^(\d+) (blob|tree) ([a-zf0-9]+)\t(.*)$}
+              next unless line =~ %r{^(\d+) (blob|tree) ([a-f0-9]+)\t(.*)$}
               hash, file = $3, $4
               # Read the gemspec
               if spec = eval(%x(git cat-file blob #{$3}))
@@ -238,6 +264,7 @@ module Bundler
           checkout
           @installed = true
         end
+        generate_bin(spec)
       end
 
       def lock
@@ -263,7 +290,7 @@ module Bundler
         if uri =~ %r{^\w+://(\w+@)?}
           # Downcase the domain component of the URI
           # and strip off a trailing slash, if one is present
-          input = URI.parse(uri).normalize.sub(%r{/$},'')
+          input = URI.parse(uri).normalize.to_s.sub(%r{/$},'')
         else
           # If there is no URI scheme, assume it is an ssh/git URI
           input = uri
@@ -287,11 +314,10 @@ module Bundler
       end
 
       def checkout
-        FileUtils.mkdir_p(path)
+        unless File.exist?("#{path}/.git")
+          %x(git clone --no-checkout #{cache_path} #{path})
+        end
         Dir.chdir(path) do
-          unless File.exist?(".git")
-            %x(git clone --no-checkout #{cache_path} #{path})
-          end
           git "fetch --quiet"
           git "reset --hard #{revision}"
         end

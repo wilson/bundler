@@ -17,6 +17,9 @@ module Bundler
     def gem(name, *args)
       options = Hash === args.last ? args.pop : {}
       version = args.last || ">= 0"
+      if options[:group]
+        options[:group] = options[:group].to_sym
+      end
 
       _deprecated_options(options)
       _normalize_options(name, version, options)
@@ -48,7 +51,7 @@ module Bundler
     end
 
     def group(name, options = {}, &blk)
-      old, @group = @group, name
+      old, @group = @group, name.to_sym
       yield
     ensure
       @group = old
@@ -77,11 +80,14 @@ module Bundler
     end
 
     def _normalize_hash(opts)
-      opts.each do |k, v|
+      # Cannot modify a hash during an iteration in 1.9
+      opts.keys.each do |k|
         next if String === k
+        v = opts[k]
         opts.delete(k)
         opts[k.to_s] = v
       end
+      opts
     end
 
     def _normalize_options(name, version, opts)

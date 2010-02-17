@@ -1,10 +1,10 @@
 require 'fileutils'
 require 'pathname'
 require 'yaml'
-require 'bundler/rubygems'
+require 'bundler/rubygems-ext'
 
 module Bundler
-  VERSION = "0.9.1"
+  VERSION = "0.9.6"
 
   autoload :Definition,          'bundler/definition'
   autoload :Dependency,          'bundler/dependency'
@@ -16,6 +16,7 @@ module Bundler
   autoload :Resolver,            'bundler/resolver'
   autoload :Runtime,             'bundler/runtime'
   autoload :Settings,            'bundler/settings'
+  autoload :SharedHelpers,       'bundler/shared_helpers'
   autoload :Source,              'bundler/source'
   autoload :Specification,       'bundler/specification'
   autoload :UI,                  'bundler/ui'
@@ -55,7 +56,7 @@ module Bundler
 
     def bundle_path
       @bundle_path ||= begin
-        path = settings[:path] || "#{Gem.user_home}/.bundle"
+        path = settings[:path] || "#{Gem.user_home}/.bundle/#{Gem.ruby_engine}/#{Gem::ConfigMap[:ruby_version]}"
         Pathname.new(path).expand_path(root)
       end
     end
@@ -95,7 +96,7 @@ module Bundler
     end
 
     def cache
-      home.join("cache")
+      bundle_path.join('cache/bundler')
     end
 
     def root
@@ -109,20 +110,12 @@ module Bundler
   private
 
     def default_gemfile
-      current = Pathname.new(Dir.pwd)
-
-      until current.root?
-        filename = current.join("Gemfile")
-        return filename if filename.exist?
-        current = current.parent
-      end
-
-      raise GemfileNotFound, "The default Gemfile was not found"
+      SharedHelpers.default_gemfile
     end
 
     def configure_gem_home_and_path
-      if path = settings[:path]
-        ENV['GEM_HOME'] = File.expand_path(path, root)
+      if settings[:disable_shared_gems]
+        ENV['GEM_HOME'] = File.expand_path(bundle_path, root)
         ENV['GEM_PATH'] = ''
       else
         gem_home, gem_path = Gem.dir, Gem.path
